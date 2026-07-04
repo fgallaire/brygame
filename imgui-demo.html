@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brygame — Dear ImGui driven from Python</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #222; }
+  canvas { display: block; }                 /* SDL sets the backing size */
+  #log {
+    position: fixed; left: 0; bottom: 0; margin: 0; z-index: 10;
+    max-height: 84px; overflow: auto; pointer-events: none;
+    color: #9f9; background: rgba(0,0,0,.45);
+    font: 12px monospace; padding: 4px 8px;
+  }
+</style>
+<!-- Brython loaded locally (vendored). Once everything is upstream this could
+     be the CDN — no need to offer the choice here. -->
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+</head>
+<body>
+<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<pre id="log"></pre>
+
+<!-- The demo, in pure Python. Started by brython() once _imgui is installed. -->
+<script type="text/python">
+from browser import window
+import _imgui as ui
+import base64
+import math
+import struct
+
+def sine_point(i):          # called by ImPlot (in C) for EACH point
+    x = i * 0.15
+    return (x, math.sin(x))
+
+def make_beep():            # 440 Hz WAV synthesized in Python, played by SDL_mixer (C)
+    sr, dur = 44100, 0.18
+    n = int(sr * dur)
+    data = bytearray()
+    for i in range(n):
+        env = 1.0 - i / n
+        data += struct.pack("<h", int(0.4 * env * math.sin(2 * math.pi * 440 * i / sr) * 32767))
+    hdr = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVE"
+    hdr += b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, sr, sr * 2, 2, 16)
+    hdr += b"data" + struct.pack("<I", len(data))
+    return bytes(hdr + data)
+
+# an RGBA texture generated in Python (exactly a pixel buffer, pygame-style)
+TW = TH = 96
+def make_rgba():
+    buf = bytearray(TW * TH * 4)
+    for y in range(TH):
+        for x in range(TW):
+            i = (y * TW + x) * 4
+            buf[i]     = (x * 255) // TW                          # R: gradient
+            buf[i + 1] = (y * 255) // TH                          # G: gradient
+            buf[i + 2] = 200 if (x // 12 + y // 12) % 2 else 60   # B: checkerboard
+            buf[i + 3] = 255
+    return bytes(buf)
+pixels = make_rgba()
+
+# all the UI state lives on the Python side (immediate-mode widgets)
+state = {
+    "checked": True, "fval": 0.35, "ival": 3, "name": "wasthon",
+    "combo": 2, "color": [0.40, 0.70, 1.00], "vec3": [1.0, 2.0, 3.0],
+    "radio": 0, "notes": "type text\non multiple lines", "clicks": 0,
+    "tex": None, "ball": [240, 150], "show_demo": False, "lst": 0, "logo": None,
+    "pwd": "secret", "log": 1.0, "ang": 0.0, "dbl": 3.14159,
+    "rmin": 20.0, "rmax": 60.0, "vsf": 0.5, "vsi": 5, "dropped": "(none)", "beep": None,
+    "dock": False, "px": 6.0, "py": 0.5, "lx": 3.0,
+}
+items = ["Red", "Green", "Blue"]
+plot_vals = [0.2, 0.6, 0.4, 0.9, 0.5, 0.75, 0.3, 0.85, 0.45, 0.65, 0.55, 0.95]
+hist_data = [((i * 9301 + 49297) % 233280) / 23328.0 for i in range(500)]   # spread 0..10
+heat = [(((i * j + i) % 9) / 9.0) for i in range(6) for j in range(6)]        # 6x6
+rows = [("Alice", 30, "Paris"), ("Bob", 25, "Lyon"), ("Carmen", 41, "Nice")]
+
+def draw():
+    ui.push_style_var(ui.STYLEVAR_WINDOW_ROUNDING, 6.0)
+    ui.push_style_var(ui.STYLEVAR_FRAME_ROUNDING, 4.0)
+
+    if state["dock"]:
+        ui.dockspace()
+
+    ui.set_next_window_size(560, 620)
+    ui.set_next_window_pos(20, 20)
+    ui.begin("Brygame demo — Dear ImGui", ui.WINDOW_MENU_BAR)
+
+    if ui.begin_menu_bar():
+        if ui.begin_menu("File"):
+            if ui.menu_item("Quit", "Ctrl+Q"):
+                window.__imgui_log("menu: Quit")
+            ui.end_menu()
+        if ui.begin_menu("Theme"):
+            if ui.menu_item("Dark"):    ui.set_theme("dark")
+            if ui.menu_item("Light"):   ui.set_theme("light")
+            if ui.menu_item("Classic"): ui.set_theme("classic")
+            ui.end_menu()
+        if ui.begin_menu("View"):
+            if ui.menu_item("ImGui demo"): state["show_demo"] = not state["show_demo"]
+            if ui.menu_item("Docking (2 windows)"): state["dock"] = not state["dock"]
+            ui.end_menu()
+        ui.end_menu_bar()
+
+    ui.text_colored(0.4, 1.0, 0.4, "FPS: " + str(round(ui.get_framerate(), 1)))
+    ui.text("Unicode OK: café, €12, naïve, œuf, Noël, 日本語.")
+    ui.separator()
+
+    if ui.begin_tab_bar("tabs"):
+        if ui.begin_tab_item("Draw"):
+            ui.text("2D canvas: arrows = move the ball; primitives + mouse.")
+            bx, by = ui.get_cursor_screen_pos()
+            CW, CH = 500, 300
+            ui.dummy(CW, CH)
+            ui.draw_rect_gradient(bx, by, bx + CW, by + CH, 0.06, 0.09, 0.18, 0.16, 0.10, 0.22)
+            ui.draw_rect(bx, by, bx + CW, by + CH, 0.4, 0.6, 1.0, 1.0, 2.0)
+            if ui.is_key_down(ui.KEY_LEFT):  state["ball"][0] -= 5
+            if ui.is_key_down(ui.KEY_RIGHT): state["ball"][0] += 5
+            if ui.is_key_down(ui.KEY_UP):    state["ball"][1] -= 5
+            if ui.is_key_down(ui.KEY_DOWN):  state["ball"][1] += 5
+            bxy = state["ball"]
+            ui.draw_line(bx + 20, by + 24, bx + CW - 20, by + 24, 0.5, 0.5, 0.9, 1.0, 1.0)
+            ui.draw_triangle_filled(bx + 60, by + CH - 40, bx + 120, by + CH - 40,
+                                    bx + 90, by + CH - 95, 0.3, 0.9, 0.5)
+            ui.draw_rect_filled(bx + CW - 90, by + CH - 70, bx + CW - 30, by + CH - 30,
+                                0.9, 0.7, 0.2, 1.0, 6.0)
+            ui.draw_circle_filled(bx + bxy[0], by + bxy[1], 20, 1.0, 0.45, 0.2)
+            ui.draw_circle(bx + bxy[0], by + bxy[1], 26, 1.0, 0.8, 0.4, 1.0, 2.0)
+            ui.draw_ngon_filled(bx + 430, by + 70, 28, 6, 0.6, 0.4, 0.9)
+            ui.draw_bezier_cubic(bx + 30, by + 150, bx + 110, by + 70,
+                                 bx + 210, by + 230, bx + 300, by + 150, 0.4, 0.9, 1.0, 1.0, 3.0)
+            ui.draw_polyline([bx + 320, by + 205, bx + 350, by + 165, bx + 380, by + 210,
+                              bx + 410, by + 168, bx + 445, by + 205], 1.0, 0.8, 0.3, 1.0, 2.0)
+            ui.draw_quad(bx + 350, by + 55, bx + 405, by + 78, bx + 395, by + 128,
+                         bx + 345, by + 105, 0.95, 0.5, 0.5, 1.0, 2.0)
+            mx, my = ui.get_mouse_pos()
+            if -1e6 < mx < 1e6:
+                pos = "mouse: " + str(int(mx - bx)) + ", " + str(int(my - by))
+            else:
+                pos = "mouse: (outside)"
+            ui.draw_text(bx + 10, by + CH - 24, 1.0, 1.0, 1.0, pos)
+            ui.end_tab_item()
+
+        if ui.begin_tab_item("Advanced"):
+            if ui.begin_combo("custom combo", items[state["combo"]]):
+                for i, it in enumerate(items):
+                    if ui.selectable(it, i == state["combo"]): state["combo"] = i
+                ui.end_combo()
+            _, state["pwd"]  = ui.input_text("password", state["pwd"], ui.INPUT_PASSWORD)
+            _, state["log"]  = ui.slider_float("log", state["log"], 0.01, 1000.0, ui.SLIDER_LOGARITHMIC)
+            _, state["ang"]  = ui.slider_angle("angle", state["ang"])
+            _, state["dbl"]  = ui.input_double("double", state["dbl"])
+            _, state["rmin"], state["rmax"] = ui.drag_float_range2(
+                "range", state["rmin"], state["rmax"], 1.0, 0.0, 100.0)
+            c = state["color"]
+            _, c[0], c[1], c[2] = ui.color_edit3("hue (HSV)", c[0], c[1], c[2], ui.COLOR_DISPLAY_HSV)
+            _, state["vsf"] = ui.vslider_float("##vsf", 32, 110, state["vsf"], 0.0, 1.0)
+            ui.same_line()
+            _, state["vsi"] = ui.vslider_int("##vsi", 32, 110, state["vsi"], 0, 10)
+            if ui.tree_node_ex("Tree (open by default)", ui.TREE_DEFAULT_OPEN):
+                ui.text("expanded automatically via TREE_DEFAULT_OPEN")
+                ui.tree_pop()
+            ui.end_tab_item()
+
+        if ui.begin_tab_item("Pro"):
+            ui.push_font_size(30)
+            ui.text("Title 30 px")
+            ui.pop_font()
+            ui.push_font_size(12)
+            ui.text("…and small 12 px text (push_font_size)")
+            ui.pop_font()
+            ui.separator_text("Drag & drop")
+            for fruit in ["Apple", "Banana", "Cherry"]:
+                ui.button(fruit)
+                if ui.begin_drag_drop_source():
+                    ui.set_drag_drop_payload("FRUIT", fruit)
+                    ui.text(fruit)
+                    ui.end_drag_drop_source()
+                ui.same_line()
+            ui.button("  Drop here  ")
+            if ui.begin_drag_drop_target():
+                got = ui.accept_drag_drop_payload("FRUIT")
+                if got: state["dropped"] = got
+                ui.end_drag_drop_target()
+            ui.text("received: " + state["dropped"])
+            ui.separator_text("Audio (SDL_mixer)")
+            if state["beep"] is None:
+                state["beep"] = ui.load_sound(make_beep())
+            if ui.button("Play a beep (synthesized in Python)"):
+                ui.play_sound(state["beep"])
+                window.__imgui_log("beep played")
+            ui.separator_text("Colored table")
+            if ui.begin_table("t2", 2, ui.TABLE_BORDERS | ui.TABLE_ROW_BG):
+                ui.table_setup_column("Color")
+                ui.table_setup_column("Code")
+                ui.table_headers_row()
+                tdata = [("red",   "E74C3C", (0.55, 0.18, 0.16)),
+                         ("green", "2ECC71", (0.16, 0.45, 0.24)),
+                         ("blue",  "3498DB", (0.16, 0.30, 0.52))]
+                for k, code, (cr, cg, cb) in tdata:
+                    ui.table_next_row()
+                    ui.table_set_bg_color(ui.TABLE_BG_ROW1, cr, cg, cb, 0.75)
+                    ui.table_next_column(); ui.text(k)
+                    ui.table_next_column(); ui.text(code)
+                ui.end_table()
+            ui.end_tab_item()
+
+        if ui.begin_tab_item("ImPlot"):
+            ui.text("Interactive plots — ImPlot (2nd C++ lib via the bridge):")
+            if ui.begin_plot("Interactive drag — drag it, the value comes back to Python", -1, 200):
+                ui.setup_axis_limits(ui.AXIS_X1, 0.0, 12.0)
+                ui.setup_axis_limits(ui.AXIS_Y1, 0.0, 1.0)
+                _, state["px"], state["py"] = ui.drag_point(1, state["px"], state["py"], 1.0, 0.5, 0.1)
+                _, state["lx"] = ui.drag_line_x(2, state["lx"], 0.3, 0.8, 1.0)
+                ui.end_plot()
+            ui.text("point = (" + str(round(state["px"], 2)) + ", " + str(round(state["py"], 2)) +
+                    ")   line x = " + str(round(state["lx"], 2)))
+            if ui.begin_plot("Pie chart", 200, 200):
+                ui.plot_pie_chart(["Red", "Green", "Blue"], [35.0, 45.0, 20.0], 0.5, 0.5, 0.45)
+                ui.end_plot()
+            ui.same_line()
+            if ui.begin_plot("Heatmap", 220, 200):
+                ui.plot_heatmap("grid", heat, 6, 6)
+                ui.end_plot()
+            if ui.begin_plot("Histogram (binned by ImPlot)", -1, 190):
+                ui.plot_hist("distribution", hist_data)
+                ui.end_plot()
+            if ui.begin_plot("Line + bars", -1, 200):
+                ui.setup_axes("x", "y")
+                ui.plot_shaded("series A", plot_vals)
+                ui.plot_line("series A", plot_vals)
+                ui.plot_bars("bars", plot_vals)
+                ui.end_plot()
+            if ui.begin_plot("Sine: each point computed in Python (C→Python callback)", -1, 200):
+                ui.plot_line_callback("sin(x)", sine_point, 80)
+                ui.end_plot()
+            ui.end_tab_item()
+
+        if ui.begin_tab_item("Image"):
+            if state["tex"] is None:
+                state["tex"] = ui.create_texture(TW, TH, pixels)
+            ui.text("RGBA texture generated pixel by pixel in Python:")
+            ui.image(state["tex"], 160, 160)
+            ui.same_line()
+            if ui.image_button("btn_img", state["tex"], 64, 64):
+                window.__imgui_log("clicked the image")
+            ui.separator_text("PNG decoded in C by stb_image (via the bridge)")
+            if state["logo"] is None:
+                b64 = window.__logo_b64 or ""
+                if b64:
+                    state["logo"] = ui.load_image(base64.b64decode(b64))
+            if state["logo"]:
+                tex, lw, lh = state["logo"]
+                ui.text("Wasthon.png: " + str(lw) + "×" + str(lh) + " px")
+                sc = 220.0 / lw if lw > 220 else 1.0
+                ui.image(tex, lw * sc, lh * sc)
+            else:
+                ui.text_disabled("(logo not loaded)")
+            ui.end_tab_item()
+
+        if ui.begin_tab_item("Overview"):
+            if ui.begin_table("t", 3, ui.TABLE_BORDERS | ui.TABLE_ROW_BG):
+                ui.table_setup_column("Name")
+                ui.table_setup_column("Age")
+                ui.table_setup_column("City")
+                ui.table_headers_row()
+                for name, age, city in rows:
+                    ui.table_next_row()
+                    ui.table_next_column(); ui.text(name)
+                    ui.table_next_column(); ui.text(str(age))
+                    ui.table_next_column(); ui.text(city)
+                ui.end_table()
+            ui.spacing()
+            ui.plot_lines("curve", plot_vals, None, 60)
+            ui.plot_histogram("hist", plot_vals, None, 60)
+            ui.progress_bar(state["fval"], "loading")
+            ui.push_style_color(ui.COL_BUTTON, 0.20, 0.55, 0.30)
+            if ui.button("Green button (styled)"):
+                window.__imgui_log("green button click")
+            ui.pop_style_color()
+            ui.same_line()
+            if ui.button("Popup"):
+                ui.open_popup("modal")
+            if ui.begin_popup_modal("modal"):
+                ui.text("A modal window in Python!")
+                if ui.button("Close"):
+                    ui.close_current_popup()
+                ui.end_popup()
+            ui.end_tab_item()
+
+        if ui.begin_tab_item("Widgets"):
+            _, state["checked"] = ui.checkbox("Enabled", state["checked"])
+            _, state["fval"]    = ui.slider_float("float", state["fval"], 0.0, 1.0)
+            _, state["ival"]    = ui.slider_int("int", state["ival"], 0, 10)
+            _, state["combo"]   = ui.combo("color", state["combo"], items)
+            _, state["vec3"]    = ui.slider_float3("vector", state["vec3"], 0.0, 5.0)
+            c = state["color"]
+            _, c[0], c[1], c[2] = ui.color_edit3("hue", c[0], c[1], c[2])
+            if ui.radio_button("Option A", state["radio"] == 0): state["radio"] = 0
+            ui.same_line()
+            if ui.radio_button("Option B", state["radio"] == 1): state["radio"] = 1
+            ui.separator_text("Even more")
+            if ui.arrow_button("ar_l", ui.DIR_LEFT): state["ival"] -= 1
+            ui.same_line()
+            if ui.arrow_button("ar_r", ui.DIR_RIGHT): state["ival"] += 1
+            ui.same_line()
+            ui.color_button("swatch", c[0], c[1], c[2])
+            ui.same_line()
+            ui.text("arrow_button + color_button")
+            _, state["lst"] = ui.list_box("list", state["lst"], items)
+            ui.begin_disabled(not state["checked"])
+            ui.button("disabled if 'Enabled' unchecked")
+            ui.end_disabled()
+            ui.end_tab_item()
+
+        if ui.begin_tab_item("Text"):
+            ui.separator_text("Input")
+            _, state["name"]  = ui.input_text("name", state["name"])
+            _, state["notes"] = ui.input_text_multiline("notes", state["notes"], 60)
+            ui.label_text("length", str(len(state["notes"])))
+            ui.text_wrapped("This text wraps automatically when the window is too "
+                            "narrow — handy for help.")
+            ui.end_tab_item()
+        ui.end_tab_bar()
+
+    ui.end()
+    if state["show_demo"]:
+        ui.show_demo_window()
+    if state["dock"]:
+        ui.begin("Panel A")
+        ui.text("Window A — docked left")
+        ui.text("(ImGui docking branch)")
+        ui.end()
+        ui.begin("Panel B")
+        ui.text("Window B — docked right")
+        ui.bullet_text("drag the tab to rearrange")
+        ui.end()
+        ui.dock_two("Panel A", "Panel B")
+    ui.pop_style_var(2)
+
+window.__imgui_log("draw() defined, calling ui.run(draw)")
+ui.run(draw)
+</script>
+
+<!-- JS bootstrap: install _imgui into Brython, fetch the logo, then start
+     brython() (which runs the <script type="text/python"> above). -->
+<script type="module">
+const log = (...a) => {
+    document.getElementById('log').textContent += a.join(' ') + '\n';
+    console.log('[imgui]', ...a);
+};
+window.__imgui_log = log;
+try {
+    log('Loading _imgui.mjs (cimgui + bridge + SDL2)…');
+    const factory = (await import('./_imgui.mjs')).default;
+    const M = await factory({ canvas: document.getElementById('canvas') });
+    M._wasthon_init();
+    const rt = M.wasthon;
+    const def = M._PyInit__imgui();
+    const mod = M._wasthon_module_create(def);
+    __BRYTHON__.imported['_imgui'] = rt.handles.get(mod);
+
+    log('_imgui installed. Starting the Python demo…');
+    brython({ debug: 1 });           // runs the <script type="text/python">
+
+    // logo fetched in the background (does not block startup); Python reads it
+    // when ready, then decodes it in C via stb_image.
+    window.__logo_b64 = '';
+    fetch('./Wasthon.png').then(r => r.arrayBuffer()).then(ab => {
+        const u8 = new Uint8Array(ab);
+        let s = '';
+        for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+        window.__logo_b64 = btoa(s);
+    }).catch(() => {});
+} catch (e) {
+    log('=== FAILED === ' + e.message);
+    console.error(e);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brygame — STANDARD pygame (import pygame)</title>
+<style>
+  html, body { margin: 0; background: #111; color: #ddd; font: 13px monospace; }
+  #wrap { display: flex; gap: 16px; padding: 10px; align-items: flex-start; }
+  canvas { background: #000; border: 1px solid #444; }
+  #log { white-space: pre-wrap; max-width: 560px; }
+  .ok { color: #9f9; } .err { color: #f77; } .step { color: #9cf; }
+</style>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="canvas" width="640" height="480" tabindex="0"></canvas>
+  <pre id="log"></pre>
+</div>
+
+<!-- ===== STUDENT CODE: 100% standard pygame. Type "text/x-python-student"
+     => neither the browser nor Brython runs it; the loader exec()s it after
+     setting pygame up. This is EXACTLY what a student would write. ===== -->
+<script type="text/x-python-student" id="studentcode">
+import pygame
+from pygame.locals import *
+
+pygame.init()
+print("pygame", pygame.ver)
+
+screen = pygame.display.set_mode((640, 480))
+pygame.display.set_caption("Brygame pygame")
+
+# top-level names (from pygame.rect import Rect, etc. done by __init__)
+r = pygame.Rect(10, 10, 50, 50)
+c = pygame.Color("dodgerblue")
+v = pygame.Vector2(3, 4)
+print("Rect", r, "| Color", c, "| Vector2 len", v.length())
+print("constants: QUIT =", QUIT, "| K_LEFT =", K_LEFT)
+
+
+class Ball(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = pygame.Surface((40, 40), pygame.SRCALPHA)
+        pygame.draw.circle(self.image, (240, 200, 60), (20, 20), 20)
+        self.rect = self.image.get_rect(center=(x, y))
+
+
+group = pygame.sprite.Group(Ball(200, 200), Ball(400, 300))
+print("sprite.Group:", len(group), "sprites")
+
+screen.fill((20, 24, 40))
+group.draw(screen)
+font = pygame.font.Font(None, 40)
+screen.blit(font.render("import pygame OK", True, (255, 255, 255)), (150, 40))
+pygame.display.flip()
+print("render OK - 100% standard pygame, zero student plumbing")
+</script>
+
+<!-- ===== wasthon LOADER (invisible to the student). It only DEFINES _run
+     (no import * here -> always compiles). The JS bootstrap calls it. ===== -->
+<script type="text/python">
+from browser import window
+def _run():
+    import sys, types
+    _log = window.__pglog
+    _src = dict(window.__pygame_pysrc)
+    _pg = window.__pygame_raw
+
+    def reg(sub):                                # pre-register a .py in sys.modules
+        full = 'pygame.' + sub
+        if full in sys.modules:
+            return
+        if sub not in _src:
+            return
+        mod = types.ModuleType(full)
+        mod.__name__ = full
+        mod.__package__ = 'pygame'
+        mod.__file__ = 'pygame/' + sub + '.py'
+        sys.modules[full] = mod
+        try:
+            exec(_src[sub], mod.__dict__)
+            setattr(_pg, sub, mod)
+        except BaseException:
+            sys.modules.pop(full, None)
+
+    for _m in ('colordict', '_data_classes', 'pkgdata'):   # required by the C init
+        reg(_m)
+    window.__pyinit_base()
+    _log('loader: PyInit_base OK', 'ok')
+
+    for _name in dir(_pg):                        # C submodules -> sys.modules
+        if type(getattr(_pg, _name)).__name__ == 'module':
+            sys.modules['pygame.' + _name] = getattr(_pg, _name)
+
+    for _m in ('version', 'locals', 'typing', 'sprite', '_sprite'):
+        reg(_m)
+
+    # sysfont: the real one scans the SYSTEM fonts via os (which don't exist in
+    # the browser) -> it fails and takes down the whole font block of __init__.
+    # Minimal stub: what __init__ needs (SysFont/get_fonts/match_font).
+    _sf = types.ModuleType('pygame.sysfont')
+    _sf.__name__ = 'pygame.sysfont'
+    _sf.__package__ = 'pygame'
+    exec('def SysFont(name, size, bold=False, italic=False, constructor=None):\n'
+         '    import pygame.font\n'
+         '    return pygame.font.Font(None, size)\n'
+         'def get_fonts():\n'
+         '    return []\n'
+         'def match_font(name, bold=False, italic=False):\n'
+         '    return None\n', _sf.__dict__)
+    sys.modules['pygame.sysfont'] = _sf
+    setattr(_pg, 'sysfont', _sf)
+
+    exec(window.__pygame_init_src, _pg.__dict__)  # the REAL __init__.py
+    _log('loader: import pygame ready', 'ok')
+
+    # === run the student code (exec = module-level context -> import * allowed) ===
+    try:
+        exec(window.__studentsrc, {'__name__': '__main__'})
+        _log('=== student code ran OK (see canvas + console) ===', 'ok')
+    except BaseException as _e:
+        import traceback
+        _log('STUDENT FAIL: ' + repr(_e), 'err')
+        _log(traceback.format_exc()[-1100:], 'err')
+window.__run = _run
+</script>
+
+<script type="module">
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+    const s = document.createElement('span');
+    s.className = cls || 'step';
+    s.textContent = (cls === 'ok' ? '✅ ' : cls === 'err' ? '❌ ' : '· ') + msg + '\n';
+    logEl.appendChild(s);
+    console.log('[std]', msg);
+}
+window.__pglog = log;
+try {
+    log('loading _pygame.mjs …');
+    const factory = (await import('./_pygame.mjs?v=' + Date.now())).default;
+    const M = await factory({ canvas: document.getElementById('canvas') });
+    M._wasthon_init();
+    const rt = M.wasthon, $B = rt.$B;
+
+    let pygameMod;
+    try { pygameMod = $B.module.$factory('pygame', ''); }
+    catch (e) {
+        pygameMod = $B.module.tp_new($B.module);
+        $B.module.tp_init(pygameMod, 'pygame', (rt._b_ && rt._b_.None) || $B.builtins.None);
+    }
+    pygameMod.__path__ = ['pygame'];
+    pygameMod.__file__ = 'pygame/__init__.py';   // sysfont does `from pygame import __file__`
+    pygameMod.$is_package = true;
+    $B.imported['pygame'] = pygameMod;
+    window.__pygame_raw = pygameMod;
+
+    const ttf = new Uint8Array(await (await fetch('./pygame/freesansbold.ttf')).arrayBuffer());
+    M.FS.writeFile('/freesansbold.ttf', ttf);
+
+    const pyMods = ['_audio', '_camera_opencv', '_data_classes', '_debug', '_sprite',
+        'camera', 'colordict', 'cursors', 'freetype', 'ftfont', 'locals', 'macosx',
+        'midi', 'pkgdata', 'sndarray', 'sprite', 'surfarray', 'sysfont', 'typing', 'version'];
+    const pysrc = {};
+    await Promise.all(pyMods.map(async n => {
+        try { pysrc[n] = await (await fetch('./pygame/' + n + '.py')).text(); } catch (e) {}
+    }));
+    window.__pygame_pysrc = pysrc;
+    window.__pygame_init_src = await (await fetch('./pygame/__init__.py')).text();
+    window.__studentsrc = document.getElementById('studentcode').textContent;
+    window.__pyinit_base = () => { M._PyInit_base(); };
+
+    if (!window.__run) brython({ debug: 1 });     // defines _run (without running it)
+    log('bootstrap OK (' + Object.keys(pysrc).length + ' .py) — starting …', 'ok');
+    try { window.__run(); }
+    catch (e) { log('run JS-ERR: ' + (e && e.message ? e.message : e), 'err'); console.error(e); }
+} catch (e) {
+    log('BOOTSTRAP FAIL: ' + (e && e.message ? e.message : e), 'err');
+    console.error(e);
+}
+</script>
+</body>
+</html>

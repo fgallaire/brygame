@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brygame — perf (max sprites at 60 fps)</title>
+<style>
+  html, body { margin: 0; background: #0e0e14; color: #ddd; font: 14px system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 14px 14px 2px; color: #9cf; }
+  #controls { margin: 8px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #fps { font: bold 20px ui-monospace, monospace; min-width: 110px; }
+  .ok { color: #7d7; } .warn { color: #fc6; } .bad { color: #f77; }
+  button { background: #1c1c28; color: #ddd; border: 1px solid #333; border-radius: 6px;
+    padding: 4px 10px; cursor: pointer; }
+  canvas { display: block; margin: 6px 14px; background: #000; border: 1px solid #333; }
+  code { color: #9f9; }
+  p { margin: 2px 14px; color: #889; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Perf — find the max sprites at 60 fps (by hand)</h1>
+<div id="controls">
+  <button id="m50">−50</button>
+  <button id="m10">−10</button>
+  <input type="number" id="num" min="0" max="3000" step="10" value="200"
+         style="width:80px;font:bold 16px monospace;background:#12121a;color:#fff;border:1px solid #333;border-radius:6px;padding:3px 6px">
+  <button id="p10">+10</button>
+  <button id="p50">+50</button>
+  <span style="color:#889">sprites</span>
+  <span id="fps" class="ok">— fps</span>
+  <span style="margin-left:12px;color:#667">presets:</span>
+  <button class="preset" data-n="100">100</button>
+  <button class="preset" data-n="200">200</button>
+  <button class="preset" data-n="300">300</button>
+  <button class="preset" data-n="500">500</button>
+  <button class="preset" data-n="800">800</button>
+</div>
+<p>N sprites = <b>a single</b> <code>screen.blits()</code> (batched draw in C) + physics in Python.
+   The displayed fps is the real rate measured over 500 ms.
+   If it throttles, <b>click the canvas</b> to give it focus back.</p>
+<canvas id="canvas" width="800" height="480" tabindex="0"></canvas>
+
+<script>
+  // shared state read by the pygame code each frame.
+  window.__target = 200;
+  const num = document.getElementById('num');
+  const canvas = document.getElementById('canvas');
+  // the browser throttles rAF when the canvas loses focus: after each button
+  // action we give it focus back to keep 60 fps.
+  const refocus = () => { try { canvas.focus(); } catch (e) {} };
+  const setN = n => {
+    n = Math.max(0, Math.min(3000, n | 0));
+    num.value = n; window.__target = n; refocus();
+  };
+  num.addEventListener('change', () => setN(parseInt(num.value, 10) || 0));
+  document.getElementById('m50').onclick = () => setN(window.__target - 50);
+  document.getElementById('m10').onclick = () => setN(window.__target - 10);
+  document.getElementById('p10').onclick = () => setN(window.__target + 10);
+  document.getElementById('p50').onclick = () => setN(window.__target + 50);
+  document.querySelectorAll('.preset').forEach(b =>
+    b.onclick = () => setN(parseInt(b.dataset.n, 10)));
+
+  // wall-clock fps counter: the pygame code calls __tick() once per frame,
+  // we divide by the real elapsed time every 500 ms.
+  let __frames = 0, __t0 = performance.now();
+  window.__tick = () => { __frames++; };
+  setInterval(() => {
+    const now = performance.now();
+    const f = __frames * 1000 / (now - __t0);
+    __frames = 0; __t0 = now;
+    const el = document.getElementById('fps');
+    el.textContent = f.toFixed(0) + ' fps';
+    el.className = f >= 55 ? 'ok' : f >= 40 ? 'warn' : 'bad';
+  }, 500);
+</script>
+
+<script src="wasthon-pygame.js"></script>
+
+<script type="text/x-pygame">
+import pygame
+import random
+from browser import window
+
+W, H = 800, 480
+pygame.init()
+screen = pygame.display.set_mode((W, H))
+clock = pygame.time.Clock()
+
+SIZE = 18
+tile = pygame.Surface((SIZE, SIZE), pygame.SRCALPHA)
+pygame.draw.circle(tile, (120, 200, 255), (SIZE // 2, SIZE // 2), SIZE // 2)
+pygame.draw.circle(tile, (255, 255, 255), (SIZE // 3, SIZE // 3), 3)
+
+class Mover:
+    __slots__ = ("x", "y", "vx", "vy")
+    def __init__(self):
+        self.x = random.uniform(0, W - SIZE)
+        self.y = random.uniform(0, H - SIZE)
+        self.vx = random.uniform(-3, 3) or 2
+        self.vy = random.uniform(-3, 3) or 2
+
+movers = []
+
+def frame():
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT:
+            return False
+
+    # sync the sprite count with the widget
+    target = int(window.__target)
+    while len(movers) < target:
+        movers.append(Mover())
+    while len(movers) > target:
+        movers.pop()
+
+    screen.fill((14, 16, 26))
+    # physics in Python, then ONE bridge call for all the blits
+    seq = []
+    for m in movers:
+        m.x += m.vx; m.y += m.vy
+        if m.x < 0 or m.x > W - SIZE: m.vx = -m.vx
+        if m.y < 0 or m.y > H - SIZE: m.vy = -m.vy
+        seq.append((tile, (m.x, m.y)))
+    if seq:
+        screen.blits(seq)
+
+    clock.tick()
+    window.__tick()
+    pygame.display.flip()
+
+pygame.run(frame)
+</script>
+</body>
+</html>

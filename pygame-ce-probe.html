@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brygame — pygame-ce (real C): first pixel</title>
+<style>
+  html, body { margin: 0; background: #111; color: #ddd; font: 13px monospace; }
+  #wrap { display: flex; gap: 16px; padding: 10px; align-items: flex-start; }
+  canvas { background: #000; border: 1px solid #444; image-rendering: pixelated; }
+  #log { white-space: pre-wrap; max-width: 640px; }
+  .ok { color: #9f9; } .err { color: #f77; } .step { color: #9cf; }
+</style>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="canvas" width="640" height="480" tabindex="-1"></canvas>
+  <pre id="log"></pre>
+</div>
+
+<script type="text/python">
+from browser import window
+def probe():
+    log = window.__pglog
+    try:
+        import sys, types
+        # 1) provide pygame's 2 .py files BEFORE the C init (PyInit_color imports
+        #    pygame.colordict, PyInit_system imports pygame._data_classes)
+        for name in ('colordict', '_data_classes'):
+            src = window.__pgsrc[name]
+            mod = types.ModuleType('pygame.' + name)
+            exec(src, mod.__dict__)
+            sys.modules['pygame.' + name] = mod
+        log('pygame.colordict + pygame._data_classes provided (exec .py -> sys.modules)', 'ok')
+
+        # 2) C init NOW (the imports above are visible)
+        window.__pg_init_base()
+
+        import pygame
+        log('import pygame OK (' + str(len([a for a in dir(pygame) if not a.startswith("_")])) + ' submodules)', 'ok')
+
+        pygame.display.init()
+        screen = pygame.display.set_mode((640, 480))
+        log('screen = ' + str(screen) + '  driver=' + pygame.display.get_driver(), 'ok')
+
+        # ============ write forensics: where do the pixels go? ============
+        log('clip = ' + str(screen.get_clip()) + '  pitch=' + str(screen.get_pitch()) +
+            '  bytesize=' + str(screen.get_bytesize()) + '  addr=' + hex(screen._pixels_address))
+        r = screen.fill((30, 30, 60))
+        log('fill -> ' + repr(r))                     # a 0x0 Rect = empty clip = silent no-op
+        screen.set_at((5, 5), (255, 255, 255))
+        log('set_at((5,5), white) then get_at = ' + str(screen.get_at((5, 5))))
+        window.__pgsample('after set_at ', screen._pixels_address)
+
+        # ============ draw + flips ============
+        pygame.draw.rect(screen, (230, 90, 90), (80, 80, 240, 160))
+        pygame.draw.circle(screen, (240, 220, 90), (200, 380), 60)
+        pygame.display.flip()
+        window.__pgsample('A draw+flip', screen._pixels_address)
+        screen.fill((200, 40, 40))
+        pygame.display.flip()
+        window.__pgsample('C redraw+flip', screen._pixels_address)
+    except Exception as e:
+        import traceback
+        log('PY FAIL: ' + repr(e), 'err')
+        log(traceback.format_exc()[-900:], 'err')
+window.__pgprobe = probe
+</script>
+
+<script type="module">
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+    const s = document.createElement('span');
+    s.className = cls || 'step';
+    s.textContent = (cls === 'ok' ? '✅ ' : cls === 'err' ? '❌ ' : '· ') + msg + '\n';
+    logEl.appendChild(s);
+    console.log('[pygame-ce]', msg);
+}
+window.__pglog = log;
+try {
+    log('loading _pygame.mjs (real pygame-ce, static WASM) …');
+    const factory = (await import('./_pygame.mjs?v=' + Date.now())).default;   /* bust module cache */
+    const M = await factory({ canvas: document.getElementById('canvas') });
+    M._wasthon_init();
+    log('wasthon_init OK', 'ok');
+    const rt = M.wasthon, $B = rt.$B;
+    const NONE = (rt._b_ && rt._b_.None) || $B.builtins.None;
+    let pygameMod;
+    try { pygameMod = $B.module.$factory('pygame', ''); }
+    catch (e) { pygameMod = $B.module.tp_new($B.module); $B.module.tp_init(pygameMod, 'pygame', NONE); }
+    pygameMod.__path__ = ['pygame'];
+    pygameMod.$is_package = true;
+    $B.imported['pygame'] = pygameMod;
+    log('pygame parent module registered (package)', 'ok');
+
+    // sources of the 2 missing .py files, exec'd on the Python side before PyInit_base
+    const srcs = {};
+    for (const n of ['colordict', '_data_classes'])
+        srcs[n] = await (await fetch('./pygame/' + n + '.py')).text();
+    window.__pgsrc = srcs;
+
+    // PyInit_base called BY the Python script (after the 2 .py are in sys.modules)
+    window.__pg_init_base = () => {
+        log('PyInit_base() …');
+        M._PyInit_base();
+        log('PyInit_base() OK — check the console: no more PyInit_color/system failed?', 'ok');
+    };
+
+    // sampler: canvas pixels + WASM memory at the Surface's pixel address
+    const ourCanvas = document.getElementById('canvas');
+    window.__pgsample = (label, addr) => {
+        let cv = 'ctx-non-2d';
+        try {
+            const c2d = ourCanvas.getContext('2d');
+            if (c2d) {
+                const px = (x, y) => Array.from(c2d.getImageData(x, y, 1, 1).data).slice(0, 3).join(',');
+                cv = '(5,5)=' + px(5, 5) + ' (100,100)=' + px(100, 100);
+            }
+        } catch (e) { cv = 'err:' + e.message; }
+        let heap = 'n/a';
+        try {
+            if (addr) {
+                const o1 = (5 * 640 + 5) * 4, o2 = (100 * 640 + 100) * 4;
+                heap = '(5,5)=' + Array.from(M.HEAPU8.slice(addr + o1, addr + o1 + 4)).join(',') +
+                       ' (100,100)=' + Array.from(M.HEAPU8.slice(addr + o2, addr + o2 + 4)).join(',');
+            }
+        } catch (e) { heap = 'err:' + e.message; }
+        log('sample [' + label + '] canvas ' + cv + ' | heap ' + heap);
+    };
+
+    brython({ debug: 1 });
+    if (window.__pgprobe) window.__pgprobe();
+
+    const sdl2 = M.SDL2;
+    log('diag: M.SDL2 ' + (sdl2 ? 'exists (blit ran)' : 'ABSENT (blit never ran)'), sdl2 ? 'ok' : 'err');
+} catch (e) {
+    log('BOOTSTRAP FAIL: ' + (e && e.message ? e.message : e), 'err');
+    console.error(e);
+}
+</script>
+</body>
+</html>

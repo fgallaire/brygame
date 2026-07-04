@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brygame — animated game (1 include)</title>
+<style>
+  html, body { margin: 0; background: #0e0e14; color: #ddd; font: 14px system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 14px 14px 2px; color: #9cf; }
+  p { margin: 2px 14px 10px; color: #889; font-size: 13px; }
+  canvas { display: block; margin: 6px 14px; background: #000; border: 1px solid #333; border-radius: 4px; }
+  code { color: #9f9; }
+</style>
+</head>
+<body>
+<h1>Animated breakout — 60 fps, real pygame-ce</h1>
+<p>One page = <code>&lt;script src="wasthon-pygame.js"&gt;</code> + the code below.
+   ◀ ▶ (or A/D) = paddle · Space = restart · click for sound.</p>
+<canvas id="canvas" width="720" height="480" tabindex="0"></canvas>
+
+<script src="wasthon-pygame.js"></script>
+
+<!-- ===== standard pygame code + pygame.run(frame) for the 60 fps loop ===== -->
+<script type="text/x-pygame">
+import pygame
+from pygame.locals import *
+import random
+
+W, H = 720, 480
+pygame.init()
+screen = pygame.display.set_mode((W, H))
+pygame.display.set_caption("Brygame — breakout")
+font = pygame.font.Font(None, 30)
+
+# bricks
+BW, BH = 66, 26
+COLORS = [(230, 90, 90), (240, 170, 70), (240, 230, 90),
+          (120, 210, 120), (100, 170, 240), (170, 130, 230)]
+def make_bricks():
+    bricks = []
+    for row in range(5):
+        for col in range(10):
+            r = pygame.Rect(12 + col * (BW + 4), 50 + row * (BH + 6), BW, BH)
+            bricks.append((r, COLORS[(row + col) % len(COLORS)]))
+    return bricks
+
+state = {}
+def reset(full=True):
+    state["ball"] = pygame.Vector2(W / 2, H - 90)
+    state["vel"] = pygame.Vector2(random.choice((-1, 1)) * 4.5, -4.5)
+    state["paddle"] = W / 2 - 60
+    if full:
+        state["bricks"] = make_bricks()
+        state["score"] = 0
+        state["lives"] = 3
+reset()
+
+BALL_R, PAD_W, PAD_H, PAD_Y = 9, 120, 14, H - 34
+keys = {"l": False, "r": False}
+
+def frame():
+    for e in pygame.event.get():
+        if e.type == QUIT:
+            return False
+        if e.type == KEYDOWN:
+            k = e.key
+            if k in (K_LEFT, K_a):   keys["l"] = True
+            if k in (K_RIGHT, K_d):  keys["r"] = True
+            if k == K_SPACE:         reset(full=False)
+        if e.type == KEYUP:
+            k = e.key
+            if k in (K_LEFT, K_a):   keys["l"] = False
+            if k in (K_RIGHT, K_d):  keys["r"] = False
+
+    if keys["l"]: state["paddle"] -= 8
+    if keys["r"]: state["paddle"] += 8
+    state["paddle"] = max(0, min(W - PAD_W, state["paddle"]))
+
+    b, v = state["ball"], state["vel"]
+    b += v
+    if b.x < BALL_R or b.x > W - BALL_R: v.x = -v.x
+    if b.y < BALL_R: v.y = -v.y
+
+    paddle = pygame.Rect(int(state["paddle"]), PAD_Y, PAD_W, PAD_H)
+    if paddle.collidepoint(b.x, b.y) and v.y > 0:
+        v.y = -v.y
+        v.x += (b.x - paddle.centerx) * 0.05
+
+    for i, (r, col) in enumerate(state["bricks"]):
+        if r.collidepoint(b.x, b.y):
+            state["bricks"].pop(i)
+            v.y = -v.y
+            state["score"] += 10
+            break
+
+    if b.y > H + BALL_R:
+        state["lives"] -= 1
+        if state["lives"] <= 0:
+            reset(full=True)
+        else:
+            reset(full=False)
+
+    # --- render ---
+    screen.fill((16, 18, 30))
+    for r, col in state["bricks"]:
+        pygame.draw.rect(screen, col, r, border_radius=5)
+    pygame.draw.rect(screen, (235, 235, 245), paddle, border_radius=7)
+    pygame.draw.circle(screen, (255, 255, 255), (int(b.x), int(b.y)), BALL_R)
+    hud = font.render("Score %d    Lives %d" % (state["score"], state["lives"]), True, (200, 210, 230))
+    screen.blit(hud, (12, 14))
+    if not state["bricks"]:
+        win = font.render("YOU WIN!  space = replay", True, (250, 240, 120))
+        screen.blit(win, (W // 2 - 150, H // 2))
+    pygame.display.flip()
+
+pygame.run(frame)      # 60 fps loop (wasthon extension: frame() via requestAnimationFrame)
+</script>
+</body>
+</html>

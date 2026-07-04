@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brygame — pygame-ce: feature suite</title>
+<style>
+  html, body { margin: 0; background: #111; color: #ddd; font: 13px monospace; }
+  #wrap { display: flex; gap: 16px; padding: 10px; align-items: flex-start; }
+  canvas { background: #000; border: 1px solid #444; }
+  #log { white-space: pre-wrap; max-width: 640px; }
+  .ok { color: #9f9; } .err { color: #f77; } .step { color: #9cf; }
+</style>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="canvas" width="640" height="480" tabindex="0"></canvas>
+  <pre id="log"></pre>
+</div>
+
+<script type="text/python">
+# pygame-ce feature suite on wasthon: each section is guarded, so ONE reload
+# gives the full map of what works / what's missing.
+from browser import window
+import sys, types, io, base64
+
+def main():
+  log = window.__pglog
+  results = {"ok": 0, "fail": 0}
+  def sec(name, fn):
+    try:
+        r = fn()
+        results["ok"] += 1
+        log('OK   ' + name + ((' -> ' + str(r)) if r is not None else ''), 'ok')
+    except Exception as e:
+        results["fail"] += 1
+        log('FAIL ' + name + ' : ' + repr(e), 'err')
+  try:
+    for name in ('colordict', '_data_classes', 'pkgdata'):
+        mod = types.ModuleType('pygame.' + name)
+        exec(window.__pgsrc[name], mod.__dict__)
+        sys.modules['pygame.' + name] = mod
+    window.__pg_init_base()
+    import pygame
+    C = pygame.constants
+    pygame.display.init()
+    screen = pygame.display.set_mode((640, 480))
+    screen.fill((16, 16, 28))
+    log('=== pygame-ce feature suite ===', 'ok')
+
+    # --- off-screen Surface + blit ---
+    surf = {}
+    def s_create():
+        surf['s'] = pygame.surface.Surface((64, 64))
+        surf['s'].fill((0, 200, 0))
+        return surf['s']
+    sec('Surface((64,64)) + fill green', s_create)
+    sec('screen.blit(surf, (10,10))', lambda: screen.blit(surf['s'], (10, 10)))
+    sec('get_at((20,20)) reads the green back', lambda: screen.get_at((20, 20)))
+    sec('blit with area=Rect(0,0,32,32)', lambda: screen.blit(surf['s'], (10, 90), pygame.rect.Rect(0, 0, 32, 32)))
+
+    # --- images ---
+    def img_frombytes():
+        img = pygame.image.frombytes(b'\xff\x00\x00\xff\x00\x00\xff\xff' * 2, (2, 2), 'RGBA')
+        screen.blit(pygame.transform.scale(img, (48, 48)), (90, 10))
+        return img
+    sec('image.frombytes 2x2 RGBA + scale + blit', img_frombytes)
+    def img_load_path():
+        # the standard pygame idiom: a PATH — the asset is in MEMFS
+        # (written by the JS bootstrap via M.FS.writeFile, pygbag model)
+        img = pygame.image.load('/red.png')
+        screen.blit(pygame.transform.scale(img, (48, 48)), (150, 10))
+        return img
+    sec("image.load('/red.png') via MEMFS + SDL_image", img_load_path)
+    PNG_1PX = base64.b64decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
+    # BytesIO: known UPSTREAM limitation — pygame-ce compiles out the file-like
+    # path under __EMSCRIPTEN__ (rwobject.c, paths only)
+    sec('image.load(BytesIO) [known upstream limitation]',
+        lambda: pygame.image.load(io.BytesIO(PNG_1PX)))
+
+    # --- Color ---
+    col = {}
+    def color_name():
+        col['c'] = pygame.color.Color('red')                   # colordict!
+        return col['c']
+    sec("Color('red') by name", color_name)
+    sec('Color + Color (nb_add)', lambda: pygame.color.Color(10, 20, 30) + pygame.color.Color(5, 5, 5))
+    sec('Color[0] (sq_item)', lambda: col['c'][0])
+    sec('len(Color) (sq_length)', lambda: len(col['c']))
+
+    # --- Vector2 ---
+    vec = {}
+    def v2_create():
+        vec['v'] = pygame.math.Vector2(3, 4)
+        return vec['v']
+    sec('math.Vector2(3,4)', v2_create)
+    sec('v.length() == 5.0', lambda: vec['v'].length())
+    sec('v + v (nb_add)', lambda: vec['v'] + vec['v'])
+    sec('v * 2 (nb_mul)', lambda: vec['v'] * 2)
+    sec('2 * v (rmul)', lambda: 2 * vec['v'])
+    sec('-v (nb_neg)', lambda: -vec['v'])
+    sec('v[0] (sq_item)', lambda: vec['v'][0])
+    sec('v.x = 7 (setattr getset)', lambda: setattr(vec['v'], 'x', 7))
+
+    # --- Rect protocol ---
+    r = pygame.rect.Rect(10, 20, 30, 40)
+    sec('Rect[2] (sq_item)', lambda: r[2])
+    sec('len(Rect)', lambda: len(r))
+    sec('Rect.colliderect', lambda: r.colliderect(pygame.rect.Rect(15, 25, 5, 5)))
+    sec('30 in Rect? (contains)', lambda: (30 in r))
+
+    # --- time / key / font / mixer ---
+    sec('time.get_ticks()', lambda: pygame.time.get_ticks())
+    clk = {}
+    def mkclock():
+        clk['c'] = pygame.time.Clock()
+        return clk['c']
+    sec('time.Clock()', mkclock)
+    sec('Clock.tick() no cap', lambda: clk['c'].tick())
+    sec('key.get_pressed()[K_LEFT]', lambda: pygame.key.get_pressed()[C.K_LEFT])
+    sec('font.init()', lambda: pygame.font.init())
+    sec('font.get_default_font()', lambda: pygame.font.get_default_font())
+    fnt = {}
+    def font_default():
+        # Font(None, 24) -> pkgdata.getResource('freesansbold.ttf').name -> MEMFS
+        fnt['f'] = pygame.font.Font(None, 24)
+        return fnt['f']
+    sec('font.Font(None, 24) via pkgdata+MEMFS', font_default)
+    def font_render():
+        txt = fnt['f'].render('Wasthon + pygame!', True, (255, 240, 120))
+        screen.blit(txt, (200, 20))
+        return txt
+    sec("render('Wasthon + pygame!') + blit", font_render)
+    sec('Font.size(text)', lambda: fnt['f'].size('Wasthon'))
+    sec("Font('/freesansbold.ttf', 36) by path",
+        lambda: pygame.font.Font('/freesansbold.ttf', 36))
+    sec('mixer.init()', lambda: pygame.mixer.init())
+    snd = {}
+    def snd_load():
+        snd['s'] = pygame.mixer.Sound('/beep.wav')     # MEMFS path -> Mix_LoadWAV
+        return snd['s']
+    sec("mixer.Sound('/beep.wav')", snd_load)
+    sec('Sound.get_length() (~0.25s)', lambda: round(snd['s'].get_length(), 3))
+    sec('Sound.set_volume(0.6)', lambda: snd['s'].set_volume(0.6))
+    sec('Sound.play() -> Channel (muted until a click)', lambda: snd['s'].play())
+    # clicking the canvas = user gesture -> the browser allows audio
+    def on_click(ev):
+        snd['s'].play()
+        window.__pglog('🔊 beep! (Sound.play from a click)', 'ok')
+    from browser import document
+    document['canvas'].bind('click', on_click)
+    log('>>> CLICK the canvas to HEAR the beep <<<', 'ok')
+
+    # --- transform ---
+    sec('transform.scale(surf, (128,128))', lambda: pygame.transform.scale(surf['s'], (128, 128)))
+    sec('transform.flip(surf, True, False)', lambda: pygame.transform.flip(surf['s'], True, False))
+
+    # --- mini-bench: 300 blits + 300 draw.circle ---
+    def bench():
+        t0 = pygame.time.get_ticks()
+        for i in range(300):
+            screen.blit(surf['s'], (i % 500, 150 + (i % 200)))
+            pygame.draw.circle(screen, (200, 200, 40), (i % 600, 400), 8)
+        dt = pygame.time.get_ticks() - t0
+        return str(dt) + ' ms for 300 blits + 300 circles (~' + str(round(600000 / max(dt, 1)) / 1000) + 'k ops/s)'
+    sec('bench 300 blits + 300 circles', bench)
+
+    pygame.display.flip()
+    log('=== summary: ' + str(results["ok"]) + ' OK / ' + str(results["fail"]) + ' FAIL ===',
+        'ok' if results["fail"] == 0 else 'err')
+  except Exception as e:
+    import traceback
+    log('SUITE ABORT: ' + repr(e), 'err')
+    log(traceback.format_exc()[-900:], 'err')
+
+window.__pgmain = main
+</script>
+
+<script type="module">
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+    const s = document.createElement('span');
+    s.className = cls || 'step';
+    s.textContent = (cls === 'ok' ? '✅ ' : cls === 'err' ? '❌ ' : '· ') + msg + '\n';
+    logEl.appendChild(s);
+    console.log('[suite]', msg);
+}
+window.__pglog = log;
+try {
+    log('loading _pygame.mjs …');
+    const factory = (await import('./_pygame.mjs?v=' + Date.now())).default;
+    const M = await factory({ canvas: document.getElementById('canvas') });
+    M._wasthon_init();
+    const rt = M.wasthon, $B = rt.$B;
+    let pygameMod;
+    try { pygameMod = $B.module.$factory('pygame', ''); }
+    catch (e) {
+        pygameMod = $B.module.tp_new($B.module);
+        $B.module.tp_init(pygameMod, 'pygame', (rt._b_ && rt._b_.None) || $B.builtins.None);
+    }
+    pygameMod.__path__ = ['pygame'];
+    pygameMod.$is_package = true;
+    $B.imported['pygame'] = pygameMod;
+    const srcs = {};
+    for (const n of ['colordict', '_data_classes'])
+        srcs[n] = await (await fetch('./pygame/' + n + '.py')).text();
+    window.__pgsrc = srcs;
+    window.__pg_init_base = () => { M._PyInit_base(); };
+
+    // assets -> MEMFS: pygame-ce/emscripten only loads by PATH (pygbag model);
+    // 1x1 red PNG + pygame's default font.
+    const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const bin = atob(pngB64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    M.FS.writeFile('/red.png', u8);
+    const ttf = new Uint8Array(await (await fetch('./pygame/freesansbold.ttf')).arrayBuffer());
+    M.FS.writeFile('/freesansbold.ttf', ttf);
+
+    // beep WAV (440 Hz, 0.25s, 16-bit PCM mono) generated in JS -> MEMFS.
+    function makeWav(freq, dur, rate) {
+        const n = Math.floor(rate * dur), data = new Int16Array(n);
+        for (let i = 0; i < n; i++) {
+            const env = 1 - i / n;                         // anti-click fade-out
+            data[i] = Math.round(0.4 * env * Math.sin(2 * Math.PI * freq * i / rate) * 32767);
+        }
+        const bytes = new Uint8Array(44 + data.byteLength), dv = new DataView(bytes.buffer);
+        const wr = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+        wr(0, 'RIFF'); dv.setUint32(4, 36 + data.byteLength, true); wr(8, 'WAVE');
+        wr(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+        dv.setUint16(22, 1, true); dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true);
+        dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+        wr(36, 'data'); dv.setUint32(40, data.byteLength, true);
+        bytes.set(new Uint8Array(data.buffer), 44);
+        return bytes;
+    }
+    const wav = makeWav(440, 0.25, 22050);
+    M.FS.writeFile('/beep.wav', wav);
+    log('MEMFS assets: /red.png (' + u8.length + ' B) + /freesansbold.ttf (' + ttf.length +
+        ' B) + /beep.wav (' + wav.length + ' B)', 'ok');
+
+    // pygame.pkgdata: font.c calls getResource('freesansbold.ttf') and only
+    // reads `.name` (a PATH) on the result, then `.close()` — minimal shim.
+    srcs['pkgdata'] = [
+        'def getResource(identifier):',
+        '    class _Res:',
+        '        name = "/" + identifier',
+        '        def close(self):',
+        '            pass',
+        '    return _Res()',
+    ].join('\n');
+
+    log('bootstrap OK — starting the suite …', 'ok');
+    if (!window.__pgmain) brython({ debug: 1 });
+    window.__pgmain();
+} catch (e) {
+    log('BOOTSTRAP FAIL: ' + (e && e.message ? e.message : e), 'err');
+    console.error(e);
+}
+</script>
+</body>
+</html>

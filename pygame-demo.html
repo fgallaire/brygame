@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brygame — pygame (SDL2 engine) driven from Python</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; }
+  canvas { display: block; margin: 0 auto; background: #000; }
+  #log {
+    position: fixed; left: 0; bottom: 0; margin: 0; z-index: 10;
+    max-height: 84px; overflow: auto; pointer-events: none;
+    color: #9f9; background: rgba(0,0,0,.45);
+    font: 12px monospace; padding: 4px 8px;
+  }
+</style>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+</head>
+<body>
+<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<pre id="log"></pre>
+
+<!-- The demo, in Python. Started by brython() once _pygame is installed. -->
+<script type="text/python">
+from browser import window
+import _pygame as _pg
+import random
+
+W, H = 800, 600
+_pg.set_mode(W, H)
+_pg.set_caption("Brygame — breakout")
+
+# --- tiny facade so the loop reads like real pygame ------------------------
+class draw:
+    @staticmethod
+    def rect(color, r):    _pg.rect(color[0], color[1], color[2], r[0], r[1], r[2], r[3])
+    @staticmethod
+    def circle(color, c, rad): _pg.circle(color[0], color[1], color[2], c[0], c[1], rad)
+
+def fill(color):  _pg.fill(color[0], color[1], color[2])
+def flip():       _pg.flip()
+
+# --- game state ------------------------------------------------------------
+BALL_R = 12
+PAD_W, PAD_H = 120, 16
+COLORS = [(255,80,80), (80,255,120), (90,160,255), (255,220,80), (220,120,255)]
+
+g = {
+    "bx": W/2, "by": H/2, "vx": 4.2, "vy": -4.2,
+    "px": (W - PAD_W) / 2, "score": 0, "ci": 0,
+}
+
+def reset_ball():
+    g["bx"], g["by"] = W/2, H/2
+    g["vx"] = 4.2 * random.choice((-1, 1))
+    g["vy"] = -4.2
+
+def update():
+    # --- events (pygame idiom) ---
+    for etype, key in _pg.get_events():
+        if etype == _pg.QUIT:
+            return
+        if etype == _pg.KEYDOWN and key == _pg.K_SPACE:
+            reset_ball()
+
+    # --- continuous input: the paddle follows the arrows (or A/D) ---
+    if _pg.key_pressed(_pg.K_LEFT)  or _pg.key_pressed(_pg.K_a):  g["px"] -= 9
+    if _pg.key_pressed(_pg.K_RIGHT) or _pg.key_pressed(_pg.K_d):  g["px"] += 9
+    g["px"] = max(0, min(W - PAD_W, g["px"]))
+
+    # --- ball physics ---
+    g["bx"] += g["vx"]; g["by"] += g["vy"]
+    if g["bx"] < BALL_R or g["bx"] > W - BALL_R:
+        g["vx"] = -g["vx"]; g["ci"] = (g["ci"] + 1) % len(COLORS)
+    if g["by"] < BALL_R:
+        g["vy"] = -g["vy"]; g["ci"] = (g["ci"] + 1) % len(COLORS)
+
+    # bounce off the paddle
+    pad_y = H - 40
+    if (g["by"] > pad_y - BALL_R and g["by"] < pad_y + PAD_H
+            and g["px"] < g["bx"] < g["px"] + PAD_W and g["vy"] > 0):
+        g["vy"] = -g["vy"]
+        g["vx"] += (g["bx"] - (g["px"] + PAD_W/2)) * 0.05   # angle from the impact point
+        g["score"] += 1
+        g["ci"] = (g["ci"] + 1) % len(COLORS)
+
+    if g["by"] > H + BALL_R:      # ball lost -> reset
+        window.__pg_log("lost! score = " + str(g["score"]))
+        g["score"] = 0
+        reset_ball()
+
+    # --- render ---
+    fill((16, 16, 28))
+    # small HUD: a score bar at the top
+    draw.rect((60, 60, 90), (0, 0, W, 6))
+    draw.rect((90, 200, 255), (0, 0, min(W, g["score"] * 30), 6))
+    # paddle
+    draw.rect((230, 230, 240), (int(g["px"]), pad_y, PAD_W, PAD_H))
+    # ball
+    draw.circle(COLORS[g["ci"]], (int(g["bx"]), int(g["by"])), BALL_R)
+    flip()
+
+window.__pg_log("ready — arrows = paddle, space = restart.")
+_pg.run(update)
+</script>
+
+<!-- JS bootstrap: install _pygame into Brython, then start brython(). -->
+<script type="module">
+const log = (...a) => {
+    document.getElementById('log').textContent += a.join(' ') + '\n';
+    console.log('[pygame]', ...a);
+};
+window.__pg_log = log;
+try {
+    log('Loading _pygame.mjs (SDL2 engine + bridge)…');
+    const factory = (await import('./_pygame.mjs')).default;
+    const M = await factory({ canvas: document.getElementById('canvas') });
+    M._wasthon_init();
+    const rt = M.wasthon;
+    const def = M._PyInit__pygame();
+    const mod = M._wasthon_module_create(def);
+    __BRYTHON__.imported['_pygame'] = rt.handles.get(mod);
+
+    log('_pygame installed. Starting the Python game…');
+    brython({ debug: 1 });
+} catch (e) {
+    log('=== FAILED === ' + e.message);
+    console.error(e);
+}
+</script>
+</body>
+</html>

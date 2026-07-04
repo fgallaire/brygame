@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brygame — breakout on the REAL pygame-ce</title>
+<style>
+  html, body { margin: 0; background: #111; color: #ddd; font: 13px monospace; }
+  #wrap { display: flex; gap: 16px; padding: 10px; align-items: flex-start; }
+  canvas { background: #000; border: 1px solid #444; }
+  #log { white-space: pre-wrap; max-width: 560px; }
+  .ok { color: #9f9; } .err { color: #f77; } .step { color: #9cf; }
+</style>
+<script src="./brython/brython.js"></script>
+<script src="./brython/brython_stdlib.js"></script>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="canvas" width="640" height="480" tabindex="0"></canvas>
+  <pre id="log"></pre>
+</div>
+
+<script type="text/python">
+# Breakout — the REAL pygame-ce (C -> WASM) driven from Python on wasthon.
+# The only browser adaptation: no `while True` (the tab would freeze) — the
+# loop body is frame(), called by requestAnimationFrame.
+# Everything lives in main(), called by the JS bootstrap once the WASM is ready
+# (Brython auto-runs this script on DOMContentLoaded, often BEFORE).
+from browser import window
+import sys, types, random
+
+def main():
+  log = window.__pglog
+  try:
+    # the 2 .py files the C init imports (PyInit_color / PyInit_system)
+    for name in ('colordict', '_data_classes'):
+        mod = types.ModuleType('pygame.' + name)
+        exec(window.__pgsrc[name], mod.__dict__)
+        sys.modules['pygame.' + name] = mod
+    window.__pg_init_base()
+
+    import pygame
+    C = pygame.constants
+
+    W, H = 640, 480
+    pygame.display.init()
+    screen = pygame.display.set_mode((W, H))
+    log('pygame-ce ready: ' + str(screen) + ' — arrows/A-D = paddle, space = restart', 'ok')
+
+    BALL_R = 12
+    PAD_W, PAD_H = 120, 16
+    PAD_Y = H - 40
+    COLORS = [(255, 80, 80), (80, 255, 120), (90, 160, 255), (255, 220, 80), (220, 120, 255)]
+
+    g = {"bx": W/2, "by": H/2, "vx": 4.2, "vy": -4.2,
+         "px": (W - PAD_W)/2, "score": 0, "ci": 0}
+    keys = {"left": False, "right": False}
+
+    def reset_ball():
+        g["bx"], g["by"] = W/2, H/2
+        g["vx"] = 4.2 * random.choice((-1, 1))
+        g["vy"] = -4.2
+
+    def frame():
+        # --- events: the REAL pygame.event.get() (SDL -> C -> Python) ---
+        for ev in pygame.event.get():
+            t = ev.type                          # T_INT member of the C type
+            if t == C.KEYDOWN or t == C.KEYUP:
+                k = ev.dict.get('key')           # the C attrs live in ev.dict
+                down = (t == C.KEYDOWN)
+                if k in (C.K_LEFT, C.K_a):
+                    keys["left"] = down
+                elif k in (C.K_RIGHT, C.K_d):
+                    keys["right"] = down
+                elif k == C.K_SPACE and down:
+                    reset_ball()
+
+        # --- paddle ---
+        if keys["left"]:  g["px"] -= 9
+        if keys["right"]: g["px"] += 9
+        g["px"] = max(0, min(W - PAD_W, g["px"]))
+
+        # --- physics ---
+        g["bx"] += g["vx"]; g["by"] += g["vy"]
+        if g["bx"] < BALL_R or g["bx"] > W - BALL_R:
+            g["vx"] = -g["vx"]; g["ci"] = (g["ci"] + 1) % len(COLORS)
+        if g["by"] < BALL_R:
+            g["vy"] = -g["vy"]; g["ci"] = (g["ci"] + 1) % len(COLORS)
+        if (g["by"] > PAD_Y - BALL_R and g["by"] < PAD_Y + PAD_H
+                and g["px"] < g["bx"] < g["px"] + PAD_W and g["vy"] > 0):
+            g["vy"] = -g["vy"]
+            g["vx"] += (g["bx"] - (g["px"] + PAD_W/2)) * 0.05
+            g["score"] += 1
+            g["ci"] = (g["ci"] + 1) % len(COLORS)
+        if g["by"] > H + BALL_R:
+            log('lost! score = ' + str(g["score"]))
+            g["score"] = 0
+            reset_ball()
+
+        # --- render: the REAL pygame C engine ---
+        screen.fill((16, 16, 28))
+        pygame.draw.rect(screen, (60, 60, 90), (0, 0, W, 6))
+        pygame.draw.rect(screen, (90, 200, 255), (0, 0, min(W, g["score"] * 30), 6))
+        pygame.draw.rect(screen, (230, 230, 240), (int(g["px"]), PAD_Y, PAD_W, PAD_H))
+        pygame.draw.circle(screen, COLORS[g["ci"]], (int(g["bx"]), int(g["by"])), BALL_R)
+        pygame.display.flip()
+
+    window.__pgframe = frame
+    window.__pg_start_loop()
+    log('rAF loop started — play! 🎮', 'ok')
+  except Exception as e:
+    import traceback
+    log('PY FAIL: ' + repr(e), 'err')
+    log(traceback.format_exc()[-900:], 'err')
+
+window.__pgmain = main
+</script>
+
+<script type="module">
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+    const s = document.createElement('span');
+    s.className = cls || 'step';
+    s.textContent = (cls === 'ok' ? '✅ ' : cls === 'err' ? '❌ ' : '· ') + msg + '\n';
+    logEl.appendChild(s);
+    console.log('[breakout]', msg);
+}
+window.__pglog = log;
+try {
+    log('loading _pygame.mjs (real pygame-ce) …');
+    const factory = (await import('./_pygame.mjs?v=' + Date.now())).default;
+    const M = await factory({ canvas: document.getElementById('canvas') });
+    M._wasthon_init();
+    const rt = M.wasthon, $B = rt.$B;
+    let pygameMod;
+    try { pygameMod = $B.module.$factory('pygame', ''); }
+    catch (e) {
+        pygameMod = $B.module.tp_new($B.module);
+        $B.module.tp_init(pygameMod, 'pygame', (rt._b_ && rt._b_.None) || $B.builtins.None);
+    }
+    pygameMod.__path__ = ['pygame'];
+    pygameMod.$is_package = true;
+    $B.imported['pygame'] = pygameMod;
+
+    const srcs = {};
+    for (const n of ['colordict', '_data_classes'])
+        srcs[n] = await (await fetch('./pygame/' + n + '.py')).text();
+    window.__pgsrc = srcs;
+    window.__pg_init_base = () => { M._PyInit_base(); };
+
+    // the loop: rAF -> Python frame(); stops and logs on the first error
+    let frames = 0;
+    window.__pg_start_loop = () => {
+        const step = () => {
+            try { window.__pgframe(); }
+            catch (e) {
+                log('frame #' + frames + ' ERROR: ' + (e.message || e), 'err');
+                console.error(e);
+                return;                      // stop the loop, not 60 err/s
+            }
+            frames++;
+            requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+    };
+
+    log('bootstrap OK — starting the game …', 'ok');
+    // Brython auto-run (DOMContentLoaded) has usually already defined __pgmain;
+    // otherwise we run the python scripts ourselves. Then we start the game.
+    if (!window.__pgmain) brython({ debug: 1 });
+    window.__pgmain();
+} catch (e) {
+    log('BOOTSTRAP FAIL: ' + (e && e.message ? e.message : e), 'err');
+    console.error(e);
+}
+</script>
+</body>
+</html>
