@@ -1,0 +1,13 @@
+# Build outputs — produced by build.sh (locally or in CI), never committed.
+/_pygame.mjs
+/_pygame.wasm
+/_imgui.mjs
+/_imgui.wasm
+/wasthon-pygame.js
+/pygame/
+/brython/
+/Wasthon.png
+
+# Build scratch
+/.wasthon/
+/_site/

@@ -15,8 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -24,15 +25,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Site statique deja construit : les artefacts _pygame.*, _imgui.* et
-      # brython/ sont pre-compiles et versionnes -> aucune compilation ici.
-      # On stage tout sauf le git/les workflows. Le deploy Pages via Actions
-      # ne passe PAS par Jekyll -> les fichiers en _*.mjs sont servis (pas de
-      # .nojekyll necessaire).
+      # Builds _pygame.*, _imgui.*, wasthon-pygame.js, pygame/, brython/ from
+      # source (clones wasthon + pins the external trees). No committed blobs.
+      - name: Build WASM/mjs artifacts
+        run: ./build.sh
+
       - name: Stage site
         run: |
           mkdir -p _site
-          rsync -a --exclude='.git' --exclude='.github' --exclude='_site' ./ _site/
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='.wasthon' \
+            --exclude='_site' --exclude='build.sh' --exclude='.gitignore' \
+            ./ _site/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
