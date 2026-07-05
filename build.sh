@@ -2,8 +2,8 @@
 # Brygame — build the WASM/mjs artifacts. These are NEVER committed: they are
 # produced here (locally or in CI) from source.
 #
-# Single source of truth = the wasthon repo: the C-API bridge (src/wasthon.*)
-# and the build recipes live there, so we clone it rather than duplicate them.
+# The generic C-API bridge (src/wasthon.*) and Brython come from the wasthon
+# repo (@main); the pygame/imgui build recipes and the loader glue live HERE.
 # The external source trees are pinned to the exact commits known to work, so a
 # rebuild reproduces the artifacts we already validated. Outputs land at the
 # repo root, ready for GitHub Pages.
@@ -11,7 +11,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 WASTHON_REPO="${WASTHON_REPO:-https://github.com/fgallaire/wasthon.git}"
-WASTHON_REF="${WASTHON_REF:-brygame}"
+WASTHON_REF="${WASTHON_REF:-main}"
 EMSCRIPTEN_VERSION="${EMSCRIPTEN_VERSION:-5.0.7}"
 PYGAME_CE_COMMIT="c650ba8d214577808ebbc8cdb9db9fd934dc8162"
 CIMGUI_COMMIT="053280dfff63a74cc56a3e493671bee4bb6c60e4"      # docking_inter (+ imgui submodule)
@@ -19,9 +19,17 @@ CIMPLOT_COMMIT="999ce3e173aa0d7b5a3d08d6727dda028b7e8e25"     # (+ implot submod
 
 W="$HERE/.wasthon"
 
-echo "=== clone wasthon @ ${WASTHON_REF} (bridge + build recipes) ==="
+echo "=== clone wasthon @ ${WASTHON_REF} (bridge + Brython) ==="
 rm -rf "$W"
 git clone --depth 1 -b "$WASTHON_REF" "$WASTHON_REPO" "$W"
+
+# The pygame/imgui build recipes live in THIS repo (the port); the wasthon
+# clone only provides the generic bridge (src/) and Brython. Inject the
+# recipes into the clone so they run with the same layout as always
+# (REPO="$HERE/.." resolves to the clone).
+mkdir -p "$W/pygame-poc" "$W/gui-poc"
+cp -r "$HERE/pygame-poc/." "$W/pygame-poc/"
+cp -r "$HERE/gui-poc/."    "$W/gui-poc/"
 
 echo "=== install emsdk ${EMSCRIPTEN_VERSION} (the build scripts source external/emsdk) ==="
 git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$W/external/emsdk"
@@ -54,7 +62,6 @@ bash "$W/gui-poc/build_binding.sh"
 echo "=== collect artifacts into $HERE ==="
 cp "$W/loader/_pygame.mjs" "$W/loader/_pygame.wasm" "$HERE/"
 cp "$W/loader/_imgui.mjs"  "$W/loader/_imgui.wasm"  "$HERE/"
-cp "$W/loader/wasthon-pygame.js" "$HERE/"
 rm -rf "$HERE/pygame";  cp -r "$W/loader/pygame"  "$HERE/pygame"
 rm -rf "$HERE/brython"; cp -r "$W/loader/brython" "$HERE/brython"
 cp "$W/Wasthon.png" "$HERE/" 2>/dev/null || cp "$W/loader/Wasthon.png" "$HERE/" 2>/dev/null || true

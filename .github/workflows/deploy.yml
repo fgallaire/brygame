@@ -36,6 +36,7 @@ jobs:
           rsync -a \
             --exclude='.git' --exclude='.github' --exclude='.wasthon' \
             --exclude='_site' --exclude='build.sh' --exclude='.gitignore' \
+            --exclude='pygame-poc' --exclude='gui-poc' \
             ./ _site/
 
       - name: Upload Pages artifact
