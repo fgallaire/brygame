@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Brygame — desktop pygame VERBATIM (while True)</title>
+<style>
+  html, body { margin: 0; background: #0e0e14; color: #ddd; font: 14px system-ui, sans-serif; }
+  h1 { font-size: 16px; margin: 14px 14px 2px; color: #9cf; }
+  p { margin: 2px 14px 10px; color: #889; font-size: 13px; }
+  canvas { display: block; margin: 6px 14px; background: #000; border: 1px solid #333; border-radius: 4px; }
+  code { color: #9f9; }
+</style>
+</head>
+<body>
+<h1>Desktop pygame, verbatim — <code>while True</code> + <code>clock.tick(60)</code> + <code>sys.exit()</code></h1>
+<p>The exact code a desktop tutorial teaches — no <code>pygame.run(frame)</code>, no adaptation.
+   The loader lifts the game loop onto the browser's frame clock at load time. ◀ ▶ move the paddle.</p>
+<canvas id="canvas" width="720" height="480" tabindex="0"></canvas>
+
+<script src="wasthon-pygame.js"></script>
+
+<script type="text/x-pygame">
+import pygame, sys
+
+pygame.init()
+screen = pygame.display.set_mode((720, 480))
+pygame.display.set_caption("Brygame — verbatim loop")
+clock = pygame.time.Clock()
+
+paddle = pygame.Rect(310, 450, 100, 14)
+ball = pygame.Rect(350, 200, 18, 18)
+vel = [4, 3]
+score = 0
+font = pygame.font.Font(None, 28)
+
+while True:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            sys.exit()
+
+    keys = pygame.key.get_pressed()
+    if keys[pygame.K_LEFT]:
+        paddle.move_ip(-7, 0)
+    if keys[pygame.K_RIGHT]:
+        paddle.move_ip(7, 0)
+    paddle.clamp_ip(screen.get_rect())
+
+    ball.move_ip(vel)
+    if ball.left < 0 or ball.right > 720:
+        vel[0] = -vel[0]
+    if ball.top < 0:
+        vel[1] = -vel[1]
+    if ball.colliderect(paddle) and vel[1] > 0:
+        vel[1] = -vel[1]
+        score += 1
+    if ball.top > 480:
+        ball.topleft = (350, 200)
+        score = 0
+
+    screen.fill((14, 14, 22))
+    pygame.draw.rect(screen, (100, 170, 240), paddle, border_radius=4)
+    pygame.draw.ellipse(screen, (240, 170, 70), ball)
+    screen.blit(font.render(f"score: {score}", True, (200, 200, 210)), (16, 12))
+    pygame.display.flip()
+    clock.tick(60)
+</script>
+</body></html>

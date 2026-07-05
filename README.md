@@ -19,31 +19,37 @@ A page is a canvas, one script include, and your pygame code:
 <script src="wasthon-pygame.js"></script>
 
 <script type="text/x-pygame">
-import pygame
+import pygame, sys
 
 pygame.init()
 screen = pygame.display.set_mode((720, 480))
+clock = pygame.time.Clock()
 ball = pygame.Rect(100, 100, 24, 24)
 v = [4, 3]
 
-def frame():
-    for e in pygame.event.get():
-        pass
+while True:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            sys.exit()
     ball.move_ip(v)
     if ball.left < 0 or ball.right > 720:  v[0] = -v[0]
     if ball.top < 0 or ball.bottom > 480:  v[1] = -v[1]
     screen.fill((16, 16, 24))
     pygame.draw.ellipse(screen, (240, 170, 70), ball)
     pygame.display.flip()
-
-pygame.run(frame)   # the browser owns the event loop: run(frame) at 60 fps
+    clock.tick(60)
 </script>
 ```
 
-The one departure from desktop pygame: the browser cannot be blocked, so the
-`while True:` loop becomes `pygame.run(frame)` — everything inside the loop is
-unchanged (`event.get()`, `Rect`, `draw`, `display.flip()`, sprites, fonts,
-sound).
+Yes — that is the **verbatim desktop code**, `while True` and `clock.tick(60)`
+included. The browser cannot be blocked, so at load time the loader lifts the
+top-level game loop onto the browser's frame clock (an AST-guided source
+transform: loop body → per-frame function, bound names promoted, `break`/
+`sys.exit()` mapped to a clean stop; `clock.tick` becomes the non-blocking
+frame pacer). Game speed is framerate-independent — on a throttled laptop the
+rendering drops to 30 fps but the game keeps its speed. The explicit
+`pygame.run(frame)` API remains available (and is what the transform targets
+under the hood).
 
 ## Demos
 
