@@ -9,10 +9,10 @@ The upstream C of **pygame-ce**, compiled to WebAssembly and running on
 
 ## Demos
 
-The hub is `index.html`. Locally:
+The hub is `loader/index.html`. Locally:
 
 ```
-python3 -m http.server
+python3 -m http.server --directory loader
 ```
 
 - **The product — 1 include**: a page is just `<script src="wasthon-pygame.js">` + standard pygame code.

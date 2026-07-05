@@ -28,8 +28,8 @@ git clone --depth 1 -b "$WASTHON_REF" "$WASTHON_REPO" "$W"
 # recipes into the clone so they run with the same layout as always
 # (REPO="$HERE/.." resolves to the clone).
 mkdir -p "$W/pygame-poc" "$W/gui-poc"
-cp -r "$HERE/pygame-poc/." "$W/pygame-poc/"
-cp -r "$HERE/gui-poc/."    "$W/gui-poc/"
+cp -r "$HERE/src/pygame/." "$W/pygame-poc/"
+cp -r "$HERE/src/imgui/."  "$W/gui-poc/"
 
 echo "=== install emsdk ${EMSCRIPTEN_VERSION} (the build scripts source external/emsdk) ==="
 git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$W/external/emsdk"
@@ -59,11 +59,12 @@ bash "$W/pygame-poc/build_pygame_ce.sh"
 echo "=== build imgui binding (cimgui + ImPlot)  -> _imgui.{mjs,wasm} ==="
 bash "$W/gui-poc/build_binding.sh"
 
-echo "=== collect artifacts into $HERE ==="
-cp "$W/loader/_pygame.mjs" "$W/loader/_pygame.wasm" "$HERE/"
-cp "$W/loader/_imgui.mjs"  "$W/loader/_imgui.wasm"  "$HERE/"
-rm -rf "$HERE/pygame";  cp -r "$W/loader/pygame"  "$HERE/pygame"
-rm -rf "$HERE/brython"; cp -r "$W/loader/brython" "$HERE/brython"
-cp "$W/Wasthon.png" "$HERE/" 2>/dev/null || cp "$W/loader/Wasthon.png" "$HERE/" 2>/dev/null || true
+echo "=== collect artifacts into $HERE/loader ==="
+mkdir -p "$HERE/loader"
+cp "$W/loader/_pygame.mjs" "$W/loader/_pygame.wasm" "$HERE/loader/"
+cp "$W/loader/_imgui.mjs"  "$W/loader/_imgui.wasm"  "$HERE/loader/"
+rm -rf "$HERE/loader/pygame";  cp -r "$W/loader/pygame"  "$HERE/loader/pygame"
+rm -rf "$HERE/loader/brython"; cp -r "$W/loader/brython" "$HERE/loader/brython"
+cp "$W/Wasthon.png" "$HERE/loader/" 2>/dev/null || cp "$W/loader/Wasthon.png" "$HERE/loader/" 2>/dev/null || true
 
 echo "=== done: _pygame.* _imgui.* wasthon-pygame.js pygame/ brython/ ==="

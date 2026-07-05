@@ -1,11 +1,11 @@
 # Build outputs — produced by build.sh (locally or in CI), never committed.
-/_pygame.mjs
-/_pygame.wasm
-/_imgui.mjs
-/_imgui.wasm
-/pygame/
-/brython/
-/Wasthon.png
+/loader/_pygame.mjs
+/loader/_pygame.wasm
+/loader/_imgui.mjs
+/loader/_imgui.wasm
+/loader/pygame/
+/loader/brython/
+/loader/Wasthon.png
 
 # Build scratch
 /.wasthon/

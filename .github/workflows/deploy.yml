@@ -33,11 +33,7 @@ jobs:
       - name: Stage site
         run: |
           mkdir -p _site
-          rsync -a \
-            --exclude='.git' --exclude='.github' --exclude='.wasthon' \
-            --exclude='_site' --exclude='build.sh' --exclude='.gitignore' \
-            --exclude='pygame-poc' --exclude='gui-poc' \
-            ./ _site/
+          cp -r loader/. _site/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
