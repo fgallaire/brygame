@@ -21,6 +21,14 @@ python3 -m http.server
 
 ## Deployment
 
-GitHub Pages via Actions (`.github/workflows/deploy.yml`) — no build step, the site
-is already built (`_pygame.*`, `_imgui.*` and `brython/` are versioned). Set once:
+GitHub Pages via Actions (`.github/workflows/deploy.yml`): `build.sh` clones
+[wasthon](https://github.com/fgallaire/wasthon), pins the upstream source trees and
+builds the WASM artifacts (`_pygame.*`, `_imgui.*`) plus the runtime (`brython/`,
+`pygame/`) from source at deploy time. No blobs are committed. Set once:
 *Settings → Pages → Source = GitHub Actions*.
+
+## License
+
+Copyright (C) 2026 Florent Gallaire <fgallaire@gmail.com>
+
+BSD 3-Clause License — same as Brython. See `LICENSE` for the full text.
