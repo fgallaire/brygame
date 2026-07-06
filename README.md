@@ -69,6 +69,10 @@ All live on the [hub](https://fgallaire.github.io/brygame/), all served from
 - [Dear ImGui](https://fgallaire.github.io/brygame/imgui-demo.html) — bonus: a
   C++ widget GUI (cimgui + ImPlot) driven from Python through the same bridge.
 
+**Brygame Studio** — the classroom editor built on Brygame (code left,
+game right, examples included; in French, for the French education system):
+**<https://brygame.forge.apps.education.fr>**
+
 Run them locally:
 
 ```
